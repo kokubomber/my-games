@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RETRO 2048</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+    :root {
+      --bg:        #0f0f1a;
+      --panel:     #1a1a2e;
+      --border:    #4a4e8a;
+      --accent:    #e040fb;
+      --accent2:   #00e5ff;
+      --text:      #e8e8f0;
+      --shadow:    #7b2fff;
+
+      /* tile colours – NES/Game Boy inspired palette */
+      --t2:    #3d3d6b;
+      --t4:    #2d6b4f;
+      --t8:    #6b4a2d;
+      --t16:   #6b2d2d;
+      --t32:   #2d2d6b;
+      --t64:   #6b1f6b;
+      --t128:  #1f5c6b;
+      --t256:  #6b5c1f;
+      --t512:  #1f6b3d;
+      --t1024: #6b1f1f;
+      --t2048: #6b5c00;
+
+      --ft2:    #9090cc;
+      --ft4:    #60cc90;
+      --ft8:    #cc9060;
+      --ft16:   #cc6060;
+      --ft32:   #6060cc;
+      --ft64:   #cc50cc;
+      --ft128:  #50aacc;
+      --ft256:  #ccaa50;
+      --ft512:  #50cc80;
+      --ft1024: #ff7070;
+      --ft2048: #ffd700;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Press Start 2P', monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px 10px 40px;
+      overflow-x: hidden;
+    }
+
+    /* scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.18) 2px,
+        rgba(0,0,0,.18) 4px
+      );
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    /* CRT vignette */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.7) 100%);
+      pointer-events: none;
+      z-index: 101;
+    }
+
+    /* ── TITLE ── */
+    .title {
+      font-size: clamp(18px, 5vw, 32px);
+      color: var(--accent);
+      text-shadow:
+        3px 3px 0 var(--shadow),
+        0 0 20px var(--accent),
+        0 0 40px var(--shadow);
+      letter-spacing: 4px;
+      margin-bottom: 6px;
+      animation: flicker 4s infinite;
+    }
+
+    .subtitle {
+      font-size: clamp(5px, 1.8vw, 8px);
+      color: var(--accent2);
+      letter-spacing: 3px;
+      margin-bottom: 20px;
+      opacity: .7;
+    }
+
+    @keyframes flicker {
+      0%,19%,21%,23%,25%,54%,56%,100% { opacity: 1; }
+      20%,22%,24%,55% { opacity: .85; }
+    }
+
+    /* ── SCORE BAR ── */
+    .score-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .score-box {
+      background: var(--panel);
+      border: 3px solid var(--border);
+      padding: 10px 16px;
+      text-align: center;
+      min-width: 110px;
+      position: relative;
+      box-shadow: 4px 4px 0 var(--border);
+      image-rendering: pixelated;
+    }
+
+    .score-box::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 6px;
+      color: var(--accent2);
+      letter-spacing: 2px;
+      margin-bottom: 6px;
+    }
+
+    .score-box .val {
+      font-size: clamp(10px, 3vw, 16px);
+      color: var(--accent);
+      text-shadow: 2px 2px 0 var(--shadow);
+    }
+
+    /* ── BUTTONS ── */
+    .btn-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .pixel-btn {
+      font-family: 'Press Start 2P', monospace;
+      font-size: 8px;
+      padding: 10px 14px;
+      background: var(--panel);
+      color: var(--accent2);
+      border: 3px solid var(--accent2);
+      cursor: pointer;
+      box-shadow: 4px 4px 0 var(--border);
+      letter-spacing: 1px;
+      transition: transform .1s, box-shadow .1s;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .pixel-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 2px 2px 0 var(--border);
+    }
+
+    /* ── BOARD ── */
+    .board-wrap {
+      background: var(--panel);
+      border: 4px solid var(--border);
+      padding: 10px;
+      box-shadow:
+        6px 6px 0 var(--border),
+        0 0 30px rgba(74,78,138,.5);
+      position: relative;
+    }
+
+    #board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      width: min(90vw, 420px);
+    }
+
+    /* ── TILES ── */
+    .cell {
+      background: #16162a;
+      border: 2px solid #2a2a4a;
+      aspect-ratio: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tile {
+      position: absolute;
+      inset: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(10px, 3.5vw, 20px);
+      font-weight: 400;
+      border: 2px solid rgba(255,255,255,.12);
+      transition: background .1s;
+      animation: pop .12s ease-out;
+    }
+
+    @keyframes pop {
+      0%   { transform: scale(.7); opacity: .4; }
+      60%  { transform: scale(1.08); }
+      100% { transform: scale(1);   opacity: 1; }
+    }
+
+    .tile.merged {
+      animation: merge .18s ease-out;
+    }
+
+    @keyframes merge {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(1.18); }
+      100% { transform: scale(1); }
+    }
+
+    /* tile value backgrounds */
+    .tile[data-v="2"]    { background: var(--t2);    color: var(--ft2); }
+    .tile[data-v="4"]    { background: var(--t4);    color: var(--ft4); }
+    .tile[data-v="8"]    { background: var(--t8);    color: var(--ft8); }
+    .tile[data-v="16"]   { background: var(--t16);   color: var(--ft16); }
+    .tile[data-v="32"]   { background: var(--t32);   color: var(--ft32); }
+    .tile[data-v="64"]   { background: var(--t64);   color: var(--ft64); }
+    .tile[data-v="128"]  { background: var(--t128);  color: var(--ft128); font-size: clamp(8px, 2.8vw, 16px); }
+    .tile[data-v="256"]  { background: var(--t256);  color: var(--ft256); font-size: clamp(8px, 2.8vw, 16px); }
+    .tile[data-v="512"]  { background: var(--t512);  color: var(--ft512); font-size: clamp(8px, 2.8vw, 16px); }
+    .tile[data-v="1024"] { background: var(--t1024); color: var(--ft1024); font-size: clamp(6px, 2.2vw, 13px); }
+    .tile[data-v="2048"] { background: var(--t2048); color: var(--ft2048);
+      font-size: clamp(6px, 2.2vw, 13px);
+      box-shadow: 0 0 18px var(--ft2048), inset 0 0 10px rgba(255,215,0,.3);
+      animation: glow 1s infinite alternate;
+    }
+
+    @keyframes glow {
+      from { box-shadow: 0 0 10px var(--ft2048); }
+      to   { box-shadow: 0 0 28px var(--ft2048), 0 0 50px rgba(255,215,0,.4); }
+    }
+
+    /* pixel corner decorations on tiles */
+    .tile::before, .tile::after {
+      content: '';
+      position: absolute;
+      width: 4px; height: 4px;
+      background: rgba(255,255,255,.15);
+    }
+    .tile::before { top: 0; left: 0; }
+    .tile::after  { bottom: 0; right: 0; }
+
+    /* ── OVERLAYS ── */
+    .overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(10,10,20,.88);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 10;
+      backdrop-filter: blur(2px);
+    }
+
+    .overlay.active { display: flex; }
+
+    .overlay-title {
+      font-size: clamp(12px, 4vw, 22px);
+      text-align: center;
+      text-shadow: 3px 3px 0 var(--shadow);
+      animation: flicker 3s infinite;
+    }
+
+    .overlay-sub {
+      font-size: 7px;
+      color: var(--accent2);
+      text-align: center;
+      line-height: 1.8;
+      opacity: .8;
+    }
+
+    /* ── HINT ── */
+    .hint {
+      margin-top: 14px;
+      font-size: 6px;
+      color: var(--border);
+      text-align: center;
+      line-height: 2;
+      letter-spacing: 1px;
+    }
+
+    /* ── PIXEL SCORE FLASH ── */
+    .flash {
+      position: fixed;
+      font-size: 10px;
+      color: var(--ft2048);
+      pointer-events: none;
+      animation: floatUp .9s ease-out forwards;
+      z-index: 200;
+    }
+
+    @keyframes floatUp {
+      0%   { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-60px); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="title">RETRO 2048</div>
+  <div class="subtitle">▶ JOIN TILES TO WIN ◀</div>
+
+  <div class="score-bar">
+    <div class="score-box" data-label="SCORE"><span class="val" id="score">0</span></div>
+    <div class="score-box" data-label="BEST"><span class="val" id="best">0</span></div>
+    <div class="score-box" data-label="MOVES"><span class="val" id="moves">0</span></div>
+  </div>
+
+  <div class="btn-bar">
+    <button class="pixel-btn" id="newGame">NEW GAME</button>
+    <button class="pixel-btn" id="undoBtn">UNDO</button>
+  </div>
+
+  <div class="board-wrap">
+    <div id="board"></div>
+
+    <!-- game over overlay -->
+    <div class="overlay" id="overOverlay">
+      <div class="overlay-title" style="color:var(--ft16)">GAME OVER</div>
+      <div class="overlay-sub">NO MORE MOVES...<br>INSERT COIN TO CONTINUE</div>
+      <button class="pixel-btn" id="retryBtn">▶ RETRY</button>
+    </div>
+
+    <!-- win overlay -->
+    <div class="overlay" id="winOverlay">
+      <div class="overlay-title" style="color:var(--ft2048)">YOU WIN!</div>
+      <div class="overlay-sub">2048 ACHIEVED!<br>KEEP GOING OR START OVER</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <button class="pixel-btn" id="keepBtn">KEEP GOING</button>
+        <button class="pixel-btn" id="winRetryBtn">NEW GAME</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint">
+    ↑↓←→ ARROW KEYS &nbsp;|&nbsp; WASD &nbsp;|&nbsp; SWIPE<br>
+    REACH 2048 TO WIN!
+  </div>
+
+<script>
+(() => {
+  'use strict';
+
+  const ROWS = 4, COLS = 4;
+
+  // ── state ──────────────────────────────────────────────
+  let grid, score, moves, best, won, history;
+
+  function initState() {
+    grid    = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+    score   = 0;
+    moves   = 0;
+    won     = false;
+    history = [];
+    addTile();
+    addTile();
+    render();
+    updateHUD();
+  }
+
+  // ── DOM ────────────────────────────────────────────────
+  const boardEl     = document.getElementById('board');
+  const scoreEl     = document.getElementById('score');
+  const bestEl      = document.getElementById('best');
+  const movesEl     = document.getElementById('moves');
+  const overOverlay = document.getElementById('overOverlay');
+  const winOverlay  = document.getElementById('winOverlay');
+
+  best = parseInt(localStorage.getItem('retro2048_best') || '0', 10);
+  bestEl.textContent = best;
+
+  // ── tile helpers ───────────────────────────────────────
+  function addTile() {
+    const empty = [];
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        if (!grid[r][c]) empty.push([r, c]);
+    if (!empty.length) return false;
+    const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+    grid[r][c] = Math.random() < 0.85 ? 2 : 4;
+    return true;
+  }
+
+  // ── rendering ──────────────────────────────────────────
+  // We keep track of merged cells per move for animation
+  let mergedCells = new Set();
+
+  function render() {
+    boardEl.innerHTML = '';
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        const v = grid[r][c];
+        if (v) {
+          const tile = document.createElement('div');
+          tile.className = 'tile' + (mergedCells.has(`${r},${c}`) ? ' merged' : '');
+          tile.dataset.v = v;
+          tile.textContent = v;
+          cell.appendChild(tile);
+        }
+        boardEl.appendChild(cell);
+      }
+    }
+    mergedCells.clear();
+  }
+
+  function updateHUD() {
+    scoreEl.textContent = score;
+    movesEl.textContent = moves;
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      localStorage.setItem('retro2048_best', best);
+    }
+  }
+
+  function showOverlay(id) {
+    document.querySelectorAll('.overlay').forEach(o => o.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  function hideOverlays() {
+    document.querySelectorAll('.overlay').forEach(o => o.classList.remove('active'));
+  }
+
+  // ── score flash ────────────────────────────────────────
+  function flashScore(pts) {
+    const el = document.createElement('div');
+    el.className = 'flash';
+    el.textContent = '+' + pts;
+    const bwr = boardEl.getBoundingClientRect();
+    el.style.left  = (bwr.left + bwr.width  / 2 - 20) + 'px';
+    el.style.top   = (bwr.top  + bwr.height / 2)      + 'px';
+    document.body.appendChild(el);
+    el.addEventListener('animationend', () => el.remove());
+  }
+
+  // ── move logic ─────────────────────────────────────────
+  function slideRow(row) {
+    const nums = row.filter(v => v);
+    const merged = Array(nums.length).fill(false);
+    let gained = 0;
+    let merges = []; // indices in nums that were merged
+
+    for (let i = 0; i < nums.length - 1; i++) {
+      if (!merged[i] && nums[i] === nums[i + 1]) {
+        nums[i] *= 2;
+        gained += nums[i];
+        nums.splice(i + 1, 1);
+        merged[i] = true;
+        merges.push(i);
+      }
+    }
+    while (nums.length < COLS) nums.push(0);
+    return { nums, gained };
+  }
+
+  function moveLeft()  { return move('left');  }
+  function moveRight() { return move('right'); }
+  function moveUp()    { return move('up');    }
+  function moveDown()  { return move('down');  }
+
+  function move(dir) {
+    const prevGrid = grid.map(r => [...r]);
+    let gained = 0;
+    mergedCells = new Set();
+
+    function processRows(tempGrid, dirKey) {
+      for (let r = 0; r < ROWS; r++) {
+        const { nums, gained: g } = slideRow(tempGrid[r]);
+        // find merged positions
+        for (let c = 0; c < COLS; c++) {
+          if (nums[c] !== 0 && nums[c] !== tempGrid[r][c]) {
+            // mark as merged if value doubled
+            if (tempGrid[r][c] !== 0 && nums[c] === tempGrid[r][c] * 2) {
+              mergedCells.add(dirKey === 'left' ? `${r},${c}` : `${r},${COLS-1-c}`);
+            }
+          }
+        }
+        tempGrid[r] = nums;
+        gained += g;
+      }
+      return gained;
+    }
+
+    let tempGrid;
+    if (dir === 'left') {
+      tempGrid = grid.map(r => [...r]);
+      gained = processRows(tempGrid, 'left');
+      // recalculate mergedCells properly
+      mergedCells = new Set();
+      for (let r = 0; r < ROWS; r++) {
+        const row = grid[r].filter(v => v);
+        let col = 0;
+        for (let i = 0; i < row.length; i++) {
+          if (i + 1 < row.length && row[i] === row[i + 1]) {
+            mergedCells.add(`${r},${col}`);
+            i++;
+          }
+          col++;
+        }
+      }
+      for (let r = 0; r < ROWS; r++) {
+        const { nums } = slideRow([...grid[r]]);
+        tempGrid[r] = nums;
+      }
+      gained = 0;
+      for (let r = 0; r < ROWS; r++) {
+        const { gained: g } = slideRow([...grid[r]]);
+        gained += g;
+      }
+      grid = tempGrid;
+    } else if (dir === 'right') {
+      mergedCells = new Set();
+      for (let r = 0; r < ROWS; r++) {
+        const reversed = [...grid[r]].reverse();
+        const { nums, gained: g } = slideRow(reversed);
+        // find merged in reversed
+        const rev2 = grid[r].slice().reverse().filter(v => v);
+        let col = 0;
+        for (let i = 0; i < rev2.length; i++) {
+          if (i + 1 < rev2.length && rev2[i] === rev2[i + 1]) {
+            mergedCells.add(`${r},${COLS - 1 - col}`);
+            i++;
+          }
+          col++;
+        }
+        grid[r] = nums.reverse();
+        gained += g;
+      }
+    } else if (dir === 'up') {
+      mergedCells = new Set();
+      for (let c = 0; c < COLS; c++) {
+        const col = grid.map(row => row[c]);
+        const colFiltered = col.filter(v => v);
+        let ci = 0;
+        for (let i = 0; i < colFiltered.length; i++) {
+          if (i + 1 < colFiltered.length && colFiltered[i] === colFiltered[i + 1]) {
+            mergedCells.add(`${ci},${c}`);
+            i++;
+          }
+          ci++;
+        }
+        const { nums, gained: g } = slideRow(col);
+        for (let r = 0; r < ROWS; r++) grid[r][c] = nums[r];
+        gained += g;
+      }
+    } else if (dir === 'down') {
+      mergedCells = new Set();
+      for (let c = 0; c < COLS; c++) {
+        const col = grid.map(row => row[c]).reverse();
+        const colFiltered = col.filter(v => v);
+        let ci = 0;
+        for (let i = 0; i < colFiltered.length; i++) {
+          if (i + 1 < colFiltered.length && colFiltered[i] === colFiltered[i + 1]) {
+            mergedCells.add(`${ROWS - 1 - ci},${c}`);
+            i++;
+          }
+          ci++;
+        }
+        const { nums, gained: g } = slideRow(col);
+        const reversed = nums.reverse();
+        for (let r = 0; r < ROWS; r++) grid[r][c] = reversed[r];
+        gained += g;
+      }
+    }
+
+    // check if grid changed
+    const changed = grid.some((row, r) => row.some((v, c) => v !== prevGrid[r][c]));
+    if (!changed) return;
+
+    if (gained) flashScore(gained);
+    score += gained;
+    moves++;
+    history.push({ grid: prevGrid.map(r => [...r]), score: score - gained, moves: moves - 1 });
+    if (history.length > 5) history.shift();
+
+    addTile();
+    render();
+    updateHUD();
+    checkState();
+  }
+
+  function checkState() {
+    // win
+    if (!won && grid.some(row => row.some(v => v === 2048))) {
+      won = true;
+      showOverlay('winOverlay');
+      return;
+    }
+    // game over
+    if (!canMove()) {
+      showOverlay('overOverlay');
+    }
+  }
+
+  function canMove() {
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) {
+        if (!grid[r][c]) return true;
+        if (c < COLS - 1 && grid[r][c] === grid[r][c + 1]) return true;
+        if (r < ROWS - 1 && grid[r][c] === grid[r + 1][c]) return true;
+      }
+    return false;
+  }
+
+  // ── undo ───────────────────────────────────────────────
+  function undo() {
+    if (!history.length) return;
+    const prev = history.pop();
+    grid  = prev.grid.map(r => [...r]);
+    score = prev.score;
+    moves = prev.moves;
+    hideOverlays();
+    render();
+    updateHUD();
+  }
+
+  // ── keyboard ───────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    const map = {
+      ArrowLeft: moveLeft,  a: moveLeft,  A: moveLeft,
+      ArrowRight: moveRight, d: moveRight, D: moveRight,
+      ArrowUp: moveUp,      w: moveUp,    W: moveUp,
+      ArrowDown: moveDown,  s: moveDown,  S: moveDown,
+    };
+    if (map[e.key]) {
+      e.preventDefault();
+      map[e.key]();
+    }
+  });
+
+  // ── touch / swipe ──────────────────────────────────────
+  let touchX, touchY;
+  const SWIPE_THRESHOLD = 30;
+
+  boardEl.addEventListener('touchstart', e => {
+    touchX = e.touches[0].clientX;
+    touchY = e.touches[0].clientY;
+  }, { passive: true });
+
+  boardEl.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchX;
+    const dy = e.changedTouches[0].clientY - touchY;
+    if (Math.abs(dx) < SWIPE_THRESHOLD && Math.abs(dy) < SWIPE_THRESHOLD) return;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      dx > 0 ? moveRight() : moveLeft();
+    } else {
+      dy > 0 ? moveDown() : moveUp();
+    }
+  }, { passive: true });
+
+  // ── button events ──────────────────────────────────────
+  document.getElementById('newGame').addEventListener('click', () => { hideOverlays(); initState(); });
+  document.getElementById('undoBtn').addEventListener('click', undo);
+  document.getElementById('retryBtn').addEventListener('click', () => { hideOverlays(); initState(); });
+  document.getElementById('keepBtn').addEventListener('click', () => { hideOverlays(); won = true; });
+  document.getElementById('winRetryBtn').addEventListener('click', () => { hideOverlays(); initState(); });
+
+  // ── start ─────────────────────────────────────────────
+  initState();
+})();
+</script>
+</body>
+</html>
